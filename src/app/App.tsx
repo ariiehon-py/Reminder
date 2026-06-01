@@ -1,20 +1,33 @@
 import { useState, useEffect } from 'react';
-import { Moon, ArrowUpRight, CheckCircle2, Star, Activity, User, Sun, Calendar } from 'lucide-react';
+import { Moon, ArrowUpRight, CheckCircle2, Star, Activity, User, Sun, Calendar, BellRing } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface PrayerData {
   history: string[]; // YYYY-MM-DD
 }
 
+const urlBase64ToUint8Array = (base64String: string) => {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, '+')
+    .replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 export default function App() {
   const [prayerData, setPrayerData] = useState<PrayerData>({ history: [] });
   const [currentView, setCurrentView] = useState<'home' | 'stats'>('home');
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubscribing, setIsSubscribing] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
       try {
-        // Fetch history from Supabase
         const { data, error } = await supabase
           .from('prayer_history')
           .select('date')
@@ -22,7 +35,6 @@ export default function App() {
 
         if (error) {
           console.error('Error fetching from Supabase:', error);
-          // Fallback to local storage
           const stored = localStorage.getItem('sembahyangData');
           if (stored) {
              setPrayerData(JSON.parse(stored));
@@ -32,7 +44,6 @@ export default function App() {
 
         const history = data.map(row => row.date);
         
-        // Migrate old local data if Supabase is empty
         const stored = localStorage.getItem('sembahyangData');
         if (history.length === 0 && stored) {
             const localData = JSON.parse(stored);
@@ -46,7 +57,6 @@ export default function App() {
         }
         
         setPrayerData({ history });
-        // Keep a local copy as backup
         localStorage.setItem('sembahyangData', JSON.stringify({ history }));
       } catch (err) {
          console.error('Unexpected error:', err);
@@ -72,7 +82,6 @@ export default function App() {
     let streak = 0;
     const historySet = new Set(prayerData.history);
     
-    // Start checking from today, or yesterday if haven't prayed today
     let checkDate = new Date();
     if (!hasPrayedToday) {
       checkDate.setDate(checkDate.getDate() - 1);
@@ -92,7 +101,6 @@ export default function App() {
   };
 
   const calculateConsistency = () => {
-    // 30 days consistency
     let prayedDays = 0;
     const historySet = new Set(prayerData.history);
     
@@ -108,13 +116,11 @@ export default function App() {
 
   const handlePrayed = async () => {
     if (!hasPrayedToday) {
-      // Optimistic update
       const newHistory = [...prayerData.history, todayStr];
       const newData = { history: newHistory };
       setPrayerData(newData);
       localStorage.setItem('sembahyangData', JSON.stringify(newData));
       
-      // Save to Supabase
       const { error } = await supabase
         .from('prayer_history')
         .insert([{ date: todayStr }]);
@@ -124,15 +130,64 @@ export default function App() {
       }
     }
   };
+  
+  const subscribeToPush = async () => {
+    setIsSubscribing(true);
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        alert('Browser Anda tidak mendukung notifikasi web push. Pastikan Anda membuka web ini di browser modern (Chrome/Safari) atau menambahkannya ke Layar Utama (Home Screen) jika di iOS.');
+        return;
+      }
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        alert('Izin notifikasi ditolak.');
+        return;
+      }
+      
+      const publicVapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      if (!publicVapidKey) {
+        alert('Kunci VAPID belum dikonfigurasi di server.');
+        return;
+      }
+
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicVapidKey)
+      });
+      
+      const subJson = subscription.toJSON();
+      
+      const { error } = await supabase.from('push_subscriptions').insert([{
+        endpoint: subJson.endpoint,
+        auth: subJson.keys?.auth,
+        p256dh: subJson.keys?.p256dh
+      }]);
+
+      if (error) {
+        if (error.code === '23505') {
+            alert('Perangkat ini sudah terdaftar untuk menerima notifikasi pengingat.');
+        } else {
+            console.error('Error saving subscription', error);
+            alert('Gagal mengaktifkan notifikasi di database.');
+        }
+      } else {
+        alert('Notifikasi Pengingat berhasil diaktifkan! Anda akan diingatkan setiap jam 8 malam.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Terjadi kesalahan saat mengaktifkan notifikasi.');
+    } finally {
+      setIsSubscribing(false);
+    }
+  };
 
   const streak = calculateStreak();
   const consistency = calculateConsistency();
 
-  // Generate last 30 days for stats view
   const generateLast30Days = () => {
     const days = [];
     const checkDate = new Date();
-    // Go back 29 days so today is the 30th day at the end
     checkDate.setDate(checkDate.getDate() - 29);
     
     for (let i = 0; i < 30; i++) {
@@ -160,7 +215,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-white via-gray-50 to-gray-200 text-black font-sans selection:bg-black selection:text-white">
-      {/* Navbar */}
       <nav className="flex items-center justify-between px-8 py-6 max-w-7xl mx-auto">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => setCurrentView('home')}>
           <Moon className="w-6 h-6" />
@@ -225,9 +279,7 @@ export default function App() {
            </div>
         ) : (
           <>
-            {/* Top Bento Section */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-16 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {/* Main Hero Card (Left) */}
               <div className="lg:col-span-7 bg-gradient-to-br from-gray-100 to-gray-50 rounded-[2rem] p-8 md:p-12 flex flex-col justify-between border border-gray-200/50 shadow-sm relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-gray-200 rounded-full blur-3xl opacity-50 -mr-20 -mt-20 pointer-events-none"></div>
                 
@@ -272,9 +324,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Right Bento Grid */}
               <div className="lg:col-span-5 grid grid-cols-2 gap-6">
-                {/* Streak Card */}
                 <div className="col-span-2 sm:col-span-1 bg-white rounded-[2rem] p-6 border border-gray-100 shadow-sm flex flex-col justify-center items-center text-center hover:border-gray-300 transition-colors">
                   <h3 className="text-6xl font-bold tracking-tighter mb-2 text-gray-900">{streak}<span className="text-3xl text-gray-400">+</span></h3>
                   <p className="text-sm text-gray-500 font-medium leading-relaxed">Hari berturut-turut<br/>menjaga konsistensi</p>
@@ -285,14 +335,12 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Abstract Graphic Card 1 */}
                 <div className="col-span-2 sm:col-span-1 bg-gradient-to-tr from-gray-900 to-gray-700 rounded-[2rem] p-6 shadow-sm relative overflow-hidden group">
                    <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIi8+PC9zdmc+')] opacity-20 group-hover:scale-110 transition-transform duration-700"></div>
                    <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-2xl pointer-events-none"></div>
                    <Moon className="w-12 h-12 text-white/80 absolute bottom-6 right-6 drop-shadow-lg" />
                 </div>
 
-                {/* Abstract Graphic Card 2 */}
                 <div className="col-span-2 bg-gradient-to-br from-gray-100 to-gray-200 rounded-[2rem] p-8 border border-white flex items-center justify-between relative overflow-hidden shadow-sm group">
                    <div className="z-10">
                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Pencapaian</p>
@@ -305,19 +353,22 @@ export default function App() {
               </div>
             </div>
 
-            {/* Bottom Section */}
             <div className="mt-24 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-150 fill-mode-both">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6">
                 <h2 className="text-3xl md:text-4xl font-bold max-w-xl leading-tight text-gray-900">
                   Membangun Kebiasaan dengan <span className="text-gray-400">Bhakti</span>
                 </h2>
-                <div className="flex items-center gap-2 text-sm font-semibold bg-white px-5 py-2.5 rounded-full shadow-sm border border-gray-200">
-                   <Activity className="w-4 h-4 text-gray-600" /> Pengingat Aktif
-                </div>
+                <button 
+                   onClick={subscribeToPush}
+                   disabled={isSubscribing}
+                   className="flex items-center gap-2 text-sm font-semibold bg-white px-5 py-2.5 rounded-full shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors"
+                >
+                   <BellRing className={`w-4 h-4 ${isSubscribing ? 'animate-bounce' : 'text-gray-600'}`} /> 
+                   {isSubscribing ? 'Mengaktifkan...' : 'Aktifkan Pengingat HP'}
+                </button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
-                {/* Card 1: Dark Style */}
                 <div className="bg-gray-900 text-white rounded-[2rem] p-8 relative overflow-hidden group hover:-translate-y-1 transition-transform duration-300 shadow-xl shadow-gray-900/10">
                    <div className="absolute top-6 right-6 w-12 h-12 bg-white/10 rounded-full flex items-center justify-center group-hover:bg-white/20 transition-colors">
                      <ArrowUpRight className="w-5 h-5 text-white" />
@@ -328,7 +379,6 @@ export default function App() {
                    </div>
                 </div>
 
-                {/* Card 2: Light Graphic Style */}
                 <div className="bg-gradient-to-b from-white to-gray-100 rounded-[2rem] p-8 relative overflow-hidden hover:-translate-y-1 transition-transform duration-300 border border-gray-200 shadow-sm">
                    <div className="flex items-center gap-2 mb-20">
                      <Sun className="w-5 h-5 text-gray-500" />
@@ -338,7 +388,6 @@ export default function App() {
                    <div className="absolute -bottom-16 -right-16 w-48 h-48 bg-gray-200/50 rounded-full blur-3xl pointer-events-none"></div>
                 </div>
 
-                {/* Card 3: Stats Style */}
                 <div className="bg-white rounded-[2rem] p-8 border border-gray-200 shadow-sm flex flex-col justify-center hover:-translate-y-1 transition-transform duration-300">
                    <div className="flex justify-between items-start mb-8">
                      <div>
