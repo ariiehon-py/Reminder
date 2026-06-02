@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
-import { Moon, ArrowUpRight, CheckCircle2, Star, Activity, User, Sun, Calendar, BellRing, X, ArrowRight, Cloud, CloudRain } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Moon, ArrowUpRight, CheckCircle2, Star, Activity, User, Sun, Calendar, BellRing, X, ArrowRight, Cloud } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import confetti from 'canvas-confetti';
-import { motion, AnimatePresence, useDragControls } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface PrayerRecord {
   date: string;
@@ -100,7 +100,7 @@ const SwipeToPray = ({ type, completed, onComplete }: { type: 'morning' | 'night
       <span className="absolute w-full text-center text-gray-500 font-semibold text-sm pointer-events-none pr-4">Geser {label}</span>
       <motion.div
         drag="x"
-        dragConstraints={{ left: 0, right: 256 - 60 - 8 }} // 64 = 256px. 256 - 60(btn) - 8(pad)
+        dragConstraints={{ left: 0, right: 256 - 60 - 8 }} 
         dragElastic={0.1}
         onDragEnd={(e, info) => {
           if (info.offset.x > 120) onComplete();
@@ -115,6 +115,51 @@ const SwipeToPray = ({ type, completed, onComplete }: { type: 'morning' | 'night
   );
 };
 
+// Gubeng, Surabaya Coordinates
+const GUBENG_LAT = -7.2756;
+const GUBENG_LNG = 112.7486;
+
+const fetchSunData = async () => {
+  const d = new Date();
+  const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  
+  const cached = localStorage.getItem('sunData');
+  if (cached) {
+     const parsed = JSON.parse(cached);
+     if (parsed.date === dateStr) {
+       return parsed;
+     }
+  }
+
+  try {
+    const res = await fetch(`https://api.sunrise-sunset.org/json?lat=${GUBENG_LAT}&lng=${GUBENG_LNG}&formatted=0`);
+    const data = await res.json();
+    if (data.status === 'OK') {
+       const sunData = {
+         sunrise: data.results.sunrise,
+         sunset: data.results.sunset,
+         date: dateStr
+       };
+       localStorage.setItem('sunData', JSON.stringify(sunData));
+       return sunData;
+    }
+  } catch (e) {
+    console.error('Failed to fetch sun data', e);
+  }
+  
+  // Fallback to 5:30 AM local time if offline
+  const fallbackSunrise = new Date();
+  fallbackSunrise.setHours(5, 30, 0, 0);
+  const fallbackSunset = new Date();
+  fallbackSunset.setHours(17, 30, 0, 0);
+  
+  return {
+    sunrise: fallbackSunrise.toISOString(),
+    sunset: fallbackSunset.toISOString(),
+    date: dateStr
+  };
+};
+
 export default function App() {
   const [prayerData, setPrayerData] = useState<PrayerData>({ history: [] });
   const [currentView, setCurrentView] = useState<'home' | 'stats'>('home');
@@ -123,29 +168,36 @@ export default function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [activeQuote, setActiveQuote] = useState<string | null>(null);
   
-  // Logical Time: 6 AM Reset
-  const getLogicalDateStr = () => {
-    const d = new Date();
-    if (d.getHours() < 6) d.setDate(d.getDate() - 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
-
-  const todayStr = getLogicalDateStr();
-  const currentHour = new Date().getHours();
-  
-  // Live Theme calculation
-  const isMorning = currentHour >= 6 && currentHour < 15;
-  const isAfternoon = currentHour >= 15 && currentHour < 18;
-  const isNight = currentHour >= 18 || currentHour < 6;
-
-  const heroTheme = isNight 
-    ? "from-gray-900 via-indigo-950 to-slate-900 text-white" 
-    : isMorning
-      ? "from-sky-100 via-blue-50 to-amber-50 text-gray-900"
-      : "from-orange-100 via-amber-50 to-red-50 text-gray-900";
+  const [todayStr, setTodayStr] = useState('');
+  const [isMorning, setIsMorning] = useState(false);
+  const [isAfternoon, setIsAfternoon] = useState(false);
+  const [isNight, setIsNight] = useState(true);
+  const [sunTimes, setSunTimes] = useState<{sunrise: Date, sunset: Date} | null>(null);
 
   useEffect(() => {
-    async function fetchData() {
+    async function initialize() {
+      // 1. Fetch Sun Data for Gubeng & Calculate Logic
+      const sun = await fetchSunData();
+      const now = new Date();
+      const sunrise = new Date(sun.sunrise);
+      const sunset = new Date(sun.sunset);
+      setSunTimes({ sunrise, sunset });
+      
+      const logicalDate = new Date();
+      if (now < sunrise) logicalDate.setDate(logicalDate.getDate() - 1);
+      
+      const dStr = `${logicalDate.getFullYear()}-${String(logicalDate.getMonth() + 1).padStart(2, '0')}-${String(logicalDate.getDate()).padStart(2, '0')}`;
+      setTodayStr(dStr);
+      
+      if (now >= sunset || now < sunrise) {
+        setIsNight(true); setIsMorning(false); setIsAfternoon(false);
+      } else if (now >= sunrise && now < new Date(sunrise.getTime() + 6 * 60 * 60 * 1000)) {
+        setIsMorning(true); setIsNight(false); setIsAfternoon(false);
+      } else {
+        setIsAfternoon(true); setIsNight(false); setIsMorning(false);
+      }
+
+      // 2. Fetch Supabase Data
       try {
         const { data, error } = await supabase.from('prayer_history').select('*').order('date', { ascending: false });
 
@@ -158,7 +210,7 @@ export default function App() {
         const history: PrayerRecord[] = data.map((row: any) => ({
            date: row.date, 
            morning: row.morning || false, 
-           night: row.night || false // if older row had no morning/night, it defaults to false (but SQL update made night true)
+           night: row.night || false 
         }));
         
         setPrayerData({ history });
@@ -168,17 +220,23 @@ export default function App() {
          setIsLoading(false);
       }
     }
-    fetchData();
+    initialize();
   }, []);
+
+  const heroTheme = isNight 
+    ? "from-gray-900 via-indigo-950 to-slate-900 text-white" 
+    : isMorning
+      ? "from-sky-100 via-blue-50 to-amber-50 text-gray-900"
+      : "from-orange-100 via-amber-50 to-red-50 text-gray-900";
 
   const todayRecord = prayerData.history.find(r => r.date === todayStr) || { date: todayStr, morning: false, night: false };
 
   const calculateStreak = () => {
-    if (prayerData.history.length === 0) return 0;
+    if (prayerData.history.length === 0 || !sunTimes) return 0;
     let streak = 0;
     const historySet = new Set(prayerData.history.filter(r => r.morning || r.night).map(r => r.date));
     let checkDate = new Date();
-    if (checkDate.getHours() < 6) checkDate.setDate(checkDate.getDate() - 1);
+    if (checkDate < sunTimes.sunrise) checkDate.setDate(checkDate.getDate() - 1);
     
     // Check if hasn't prayed today at all
     if (!todayRecord.morning && !todayRecord.night) {
@@ -196,10 +254,11 @@ export default function App() {
   };
 
   const calculateConsistency = () => {
+    if (!sunTimes) return 0;
     let prayedDays = 0;
     const historySet = new Set(prayerData.history.filter(r => r.morning || r.night).map(r => r.date));
     const checkDate = new Date();
-    if (checkDate.getHours() < 6) checkDate.setDate(checkDate.getDate() - 1);
+    if (checkDate < sunTimes.sunrise) checkDate.setDate(checkDate.getDate() - 1);
 
     for (let i = 0; i < 30; i++) {
       const dateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
@@ -289,9 +348,10 @@ export default function App() {
   const consistency = calculateConsistency();
 
   const generateLast30Days = () => {
+    if (!sunTimes) return [];
     const days = [];
     const checkDate = new Date();
-    if (checkDate.getHours() < 6) checkDate.setDate(checkDate.getDate() - 1);
+    if (checkDate < sunTimes.sunrise) checkDate.setDate(checkDate.getDate() - 1);
     checkDate.setDate(checkDate.getDate() - 29);
     for (let i = 0; i < 30; i++) {
       const dateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
@@ -307,12 +367,12 @@ export default function App() {
     return days;
   };
 
-  if (isLoading) {
+  if (isLoading || !sunTimes) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="animate-pulse flex flex-col items-center">
           <Moon className="w-10 h-10 text-gray-400 mb-4 animate-spin-slow" />
-          <p className="text-gray-500 font-medium">Memuat energi prana...</p>
+          <p className="text-gray-500 font-medium">Menyesuaikan jam rotasi bumi...</p>
         </div>
       </div>
     );
@@ -331,8 +391,9 @@ export default function App() {
               <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-6"><Moon className="w-6 h-6 text-black" /></div>
               <h2 className="text-2xl font-bold mb-4">Filosofi Bhakti</h2>
               <p className="text-gray-600 mb-6 leading-relaxed">
-                Hari spiritual baru dimulai saat fajar menyingsing (06:00 WITA). 
-                Aplikasi ini merekam jejak bhakti Anda di pagi hari sebagai bekal karma baik, dan malam hari sebagai bentuk rasa syukur.
+                Waktu di aplikasi ini selaras dengan alam semesta. "Hari Baru" Anda direset tepat pada detik 
+                <strong> matahari terbit di ufuk timur Surabaya</strong> ({sunTimes.sunrise.toLocaleTimeString('id-ID', { hour: '2-digit', minute:'2-digit' })}). 
+                Jaga sradha Anda setiap pagi dan malam.
               </p>
               <button onClick={() => setShowAbout(false)} className="w-full py-3 bg-black text-white rounded-xl font-semibold hover:bg-gray-800 transition-colors">Tutup</button>
             </motion.div>
@@ -346,10 +407,10 @@ export default function App() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4" onClick={() => setActiveQuote(null)}>
             <motion.div initial={{ scale: 0.8, rotateX: 20 }} animate={{ scale: 1, rotateX: 0 }} exit={{ scale: 0.8, rotateX: 20 }} className="bg-gradient-to-b from-gray-800 to-black border border-gray-700 text-white rounded-[2rem] p-8 md:p-12 max-w-lg w-full shadow-2xl relative text-center cursor-pointer" onClick={(e) => e.stopPropagation()}>
               <Star className="w-8 h-8 text-yellow-500 mx-auto mb-8 animate-pulse" />
-              <p className="text-xl md:text-2xl font-medium leading-relaxed italic text-gray-200">
+              <p className="text-xl md:text-2xl font-medium leading-relaxed italic text-gray-200 min-h-[6rem]">
                 <Typewriter text={activeQuote} />
               </p>
-              <button onClick={() => setActiveQuote(null)} className="mt-12 px-8 py-3 bg-white/10 rounded-full text-sm font-semibold hover:bg-white/20 transition-colors">Tutup</button>
+              <button onClick={() => setActiveQuote(null)} className="mt-12 px-8 py-3 bg-white/10 rounded-full text-sm font-semibold hover:bg-white/20 transition-colors">Selesai</button>
             </motion.div>
           </motion.div>
         )}
@@ -393,13 +454,11 @@ export default function App() {
                       <span className="z-10">{day.date.getDate()}</span>
                       <span className="text-[10px] opacity-60 z-10">{day.date.toLocaleDateString('id-ID', { weekday: 'short' })}</span>
                       
-                      {/* Indicators */}
                       <div className="absolute bottom-1.5 flex gap-1 z-10">
                          {day.prayedMorning && <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 shadow-sm"></div>}
                          {day.prayedNight && <div className="w-1.5 h-1.5 rounded-full bg-black shadow-sm"></div>}
                       </div>
                       
-                      {/* Full fill if both completed */}
                       {(day.prayedMorning && day.prayedNight) && <div className="absolute inset-0 bg-green-100 opacity-50 z-0"></div>}
                     </motion.div>
                   ))}
@@ -420,7 +479,6 @@ export default function App() {
         ) : (
           <>
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-16">
-              {/* LIVE THEME HERO CARD */}
               <div className={`lg:col-span-7 bg-gradient-to-br rounded-[2rem] p-8 md:p-12 flex flex-col justify-between border border-gray-200/20 shadow-sm relative overflow-hidden transition-colors duration-1000 ${heroTheme}`}>
                 <div className="absolute top-0 right-0 w-64 h-64 bg-white/20 rounded-full blur-3xl opacity-50 -mr-20 -mt-20 pointer-events-none"></div>
                 
@@ -440,7 +498,7 @@ export default function App() {
                   </h1>
                   
                   <p className="opacity-90 max-w-md text-lg mb-12">
-                    Hari baru dihitung mulai fajar menyingsing. Kumpulkan kedamaian batin dari pagi hingga malam.
+                    Hari ini dimulai tepat pukul {sunTimes.sunrise.toLocaleTimeString('id-ID', { hour: '2-digit', minute:'2-digit' })}. Jaga pikiran dan jiwa tetap tenang.
                   </p>
                 </div>
 
