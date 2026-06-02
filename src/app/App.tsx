@@ -96,18 +96,13 @@ const CelestialBody = ({ isNight }: { isNight: boolean }) => {
         dragConstraints={{ left: -100, right: windowSize.w - 100, top: -100, bottom: windowSize.h - 100 }}
         dragElastic={0.1}
         initial={{ x: windowSize.w / 2 + 50, y: 150 }}
-        className={`absolute pointer-events-auto w-40 h-40 rounded-full cursor-grab active:cursor-grabbing flex items-center justify-center border border-white/20 backdrop-blur-md transition-colors duration-1000
+        className={`absolute pointer-events-auto w-32 h-32 md:w-40 md:h-40 rounded-full cursor-grab active:cursor-grabbing border border-white/30 backdrop-blur-md transition-colors duration-1000
           ${isNight 
-            ? 'bg-blue-400/10 shadow-[0_0_200px_120px_rgba(147,197,253,0.35)]' 
-            : 'bg-yellow-200/20 shadow-[0_0_200px_120px_rgba(253,224,71,0.45)]'
+            ? 'bg-gradient-to-tr from-blue-200/40 to-white/60 shadow-[0_0_150px_100px_rgba(147,197,253,0.35)]' 
+            : 'bg-gradient-to-tr from-orange-200/50 to-yellow-100/80 shadow-[0_0_150px_100px_rgba(253,224,71,0.45)]'
           }
         `}
-      >
-        {isNight 
-          ? <Moon className="w-20 h-20 text-blue-100 drop-shadow-[0_0_20px_rgba(147,197,253,0.8)]" /> 
-          : <Sun className="w-20 h-20 text-yellow-100 drop-shadow-[0_0_20px_rgba(253,224,71,0.8)]" />
-        }
-      </motion.div>
+      />
     </div>
   )
 };
@@ -394,7 +389,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <nav className="flex items-center justify-between px-8 py-6 max-w-7xl mx-auto relative z-10">
+      <nav className="flex items-center justify-between px-8 py-6 max-w-7xl mx-auto relative z-10 pointer-events-auto">
         <div className="flex items-center gap-2 cursor-pointer group" onClick={() => setCurrentView('home')}>
           <motion.div whileHover={{ rotate: 180 }} transition={{ duration: 0.5 }}>
             <Moon className={`w-6 h-6 transition-colors ${isNight ? 'group-hover:text-gray-300' : 'group-hover:text-gray-600'}`} />
@@ -408,9 +403,9 @@ export default function App() {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-8 pt-4 md:pt-12 pb-24 relative z-10">
+      <main className="max-w-7xl mx-auto px-8 pt-4 md:pt-12 pb-24 relative z-10 pointer-events-none">
         {currentView === 'stats' ? (
-           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto">
+           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto pointer-events-auto">
              <div className={`rounded-[2rem] p-10 border shadow-sm ${glassCardSolid}`}>
                 <div className="flex items-center gap-3 mb-8">
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center border ${glassIconBg}`}>
@@ -456,8 +451,8 @@ export default function App() {
            </motion.div>
         ) : (
           <>
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-16">
-              <div className={`lg:col-span-7 bg-gradient-to-br rounded-[2rem] p-8 md:p-12 flex flex-col justify-between border shadow-sm relative overflow-hidden transition-colors duration-1000 backdrop-blur-2xl ${heroTheme}`}>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-16 pointer-events-none">
+              <div className={`lg:col-span-7 bg-gradient-to-br rounded-[2rem] p-8 md:p-12 flex flex-col justify-between border shadow-sm relative overflow-hidden transition-colors duration-1000 backdrop-blur-2xl pointer-events-auto ${heroTheme}`}>
                 <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl opacity-50 -mr-20 -mt-20 pointer-events-none"></div>
                 
                 <div className="relative z-10">
@@ -486,8 +481,8 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="lg:col-span-5 grid grid-cols-2 gap-6">
-                <motion.div drag dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }} dragElastic={0.2} className={`col-span-2 sm:col-span-1 rounded-[2rem] p-6 border flex flex-col justify-center items-center text-center cursor-grab active:cursor-grabbing hover:border-white/40 transition-colors z-20 ${glassCard}`}>
+              <div className="lg:col-span-5 grid grid-cols-2 gap-6 pointer-events-none">
+                <motion.div drag dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }} dragElastic={0.2} className={`col-span-2 sm:col-span-1 rounded-[2rem] p-6 border flex flex-col justify-center items-center text-center cursor-grab active:cursor-grabbing hover:border-white/40 transition-colors z-20 pointer-events-auto ${glassCard}`}>
                   <h3 className={`text-6xl font-bold tracking-tighter mb-2 ${glassTextBold}`}>{streak}<span className="text-3xl opacity-50">+</span></h3>
                   <p className={`text-sm font-medium leading-relaxed ${glassTextMuted}`}>Hari berturut-turut<br/>menjaga konsistensi</p>
                   <div className="mt-6 flex -space-x-2">
@@ -497,13 +492,13 @@ export default function App() {
                   </div>
                 </motion.div>
 
-                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={showRandomSloka} className="col-span-2 sm:col-span-1 bg-gradient-to-tr from-gray-900/80 to-gray-700/80 backdrop-blur-xl border border-gray-600/50 rounded-[2rem] p-6 shadow-sm relative overflow-hidden group cursor-pointer z-20">
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={showRandomSloka} className="col-span-2 sm:col-span-1 bg-gradient-to-tr from-gray-900/80 to-gray-700/80 backdrop-blur-xl border border-gray-600/50 rounded-[2rem] p-6 shadow-sm relative overflow-hidden group cursor-pointer z-20 pointer-events-auto">
                    <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
                    <Moon className="w-12 h-12 text-white/90 absolute bottom-6 right-6 drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]" />
                    <p className="text-white/60 text-xs font-bold uppercase tracking-widest absolute top-6 left-6">Pesan Alam</p>
                 </motion.div>
 
-                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={showRandomSloka} className={`col-span-2 rounded-[2rem] p-8 border flex items-center justify-between relative overflow-hidden shadow-sm group cursor-pointer z-20 ${glassCard}`}>
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={showRandomSloka} className={`col-span-2 rounded-[2rem] p-8 border flex items-center justify-between relative overflow-hidden shadow-sm group cursor-pointer z-20 pointer-events-auto ${glassCard}`}>
                    <div className="z-10">
                      <p className={`text-xs font-bold uppercase tracking-wider mb-2 transition-colors ${glassTextMuted} group-hover:${glassTextBold}`}>Lihat Sloka</p>
                      <h4 className={`text-2xl font-bold leading-tight ${glassTextBold}`}>Ketenangan Hati &<br/>Pikiran Positif</h4>
@@ -515,8 +510,8 @@ export default function App() {
               </div>
             </motion.div>
 
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="mt-24 mb-12">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6 relative z-20">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="mt-24 mb-12 pointer-events-none">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6 relative z-20 pointer-events-auto">
                 <h2 className={`text-3xl md:text-4xl font-bold max-w-xl leading-tight ${isNight ? 'text-white' : 'text-gray-900'}`}>
                   Membangun Kebiasaan dengan <span className={isNight ? 'text-gray-400' : 'text-gray-400'}>Bhakti</span>
                 </h2>
@@ -531,8 +526,8 @@ export default function App() {
                 </motion.button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 relative z-20">
-                <motion.div whileHover={{ y: -10 }} onClick={showRandomSloka} className="bg-gray-900/80 backdrop-blur-xl border border-gray-700/50 text-white rounded-[2rem] p-8 relative overflow-hidden group shadow-xl cursor-pointer">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 relative z-20 pointer-events-none">
+                <motion.div whileHover={{ y: -10 }} onClick={showRandomSloka} className="bg-gray-900/80 backdrop-blur-xl border border-gray-700/50 text-white rounded-[2rem] p-8 relative overflow-hidden group shadow-xl cursor-pointer pointer-events-auto">
                    <div className="absolute top-6 right-6 w-12 h-12 bg-white/10 rounded-full flex items-center justify-center group-hover:bg-white/20 group-hover:rotate-45 transition-all">
                      <ArrowUpRight className="w-5 h-5 text-white" />
                    </div>
@@ -542,7 +537,7 @@ export default function App() {
                    </div>
                 </motion.div>
 
-                <motion.div whileHover={{ y: -10 }} onClick={showRandomSloka} className={`rounded-[2rem] p-8 relative overflow-hidden border shadow-sm cursor-pointer group ${glassCard}`}>
+                <motion.div whileHover={{ y: -10 }} onClick={showRandomSloka} className={`rounded-[2rem] p-8 relative overflow-hidden border shadow-sm cursor-pointer group pointer-events-auto ${glassCard}`}>
                    <div className="flex items-center gap-2 mb-20 group-hover:scale-110 origin-left transition-transform">
                      <Sun className="w-5 h-5 text-orange-500 drop-shadow-[0_0_8px_rgba(249,115,22,0.8)]" />
                      <span className={`font-bold tracking-wide ${glassTextBold}`}>Fajar</span>
@@ -551,7 +546,7 @@ export default function App() {
                    <div className="absolute -bottom-16 -right-16 w-48 h-48 bg-orange-400/20 rounded-full blur-3xl pointer-events-none group-hover:bg-orange-400/30 transition-colors duration-700"></div>
                 </motion.div>
 
-                <motion.div whileHover={{ y: -10 }} className={`rounded-[2rem] p-8 border shadow-sm flex flex-col justify-center relative group ${glassCard}`}>
+                <motion.div whileHover={{ y: -10 }} className={`rounded-[2rem] p-8 border shadow-sm flex flex-col justify-center relative group pointer-events-auto ${glassCard}`}>
                    <div className="flex justify-between items-start mb-8">
                      <div>
                        <h3 className={`text-6xl font-bold tracking-tighter mb-1 ${glassTextBold}`}>{consistency}<span className="text-3xl opacity-40">%</span></h3>
