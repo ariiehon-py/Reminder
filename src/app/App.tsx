@@ -229,6 +229,12 @@ export default function App() {
       ? "from-sky-100 via-blue-50 to-amber-50 text-gray-900"
       : "from-orange-100 via-amber-50 to-red-50 text-gray-900";
 
+  const appTheme = isNight
+    ? "from-blue-950 via-slate-900 to-black text-gray-100 selection:bg-white selection:text-black"
+    : isMorning
+      ? "from-orange-200 via-amber-100 to-yellow-50 text-gray-900 selection:bg-black selection:text-white"
+      : "from-white via-yellow-50 to-amber-100 text-gray-900 selection:bg-black selection:text-white";
+
   const todayRecord = prayerData.history.find(r => r.date === todayStr) || { date: todayStr, morning: false, night: false };
 
   const calculateStreak = () => {
@@ -379,7 +385,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-white via-gray-50 to-gray-200 text-black font-sans selection:bg-black selection:text-white relative overflow-hidden">
+    <div className={`min-h-screen bg-gradient-to-br font-sans relative overflow-hidden transition-colors duration-1000 ${appTheme}`}>
       <Particles />
 
       {/* About Modal */}
@@ -419,14 +425,14 @@ export default function App() {
       <nav className="flex items-center justify-between px-8 py-6 max-w-7xl mx-auto relative z-10">
         <div className="flex items-center gap-2 cursor-pointer group" onClick={() => setCurrentView('home')}>
           <motion.div whileHover={{ rotate: 180 }} transition={{ duration: 0.5 }}>
-            <Moon className="w-6 h-6 group-hover:text-gray-600 transition-colors" />
+            <Moon className={`w-6 h-6 transition-colors ${isNight ? 'group-hover:text-gray-300' : 'group-hover:text-gray-600'}`} />
           </motion.div>
           <span className="font-bold text-xl tracking-tight">Bhakti</span>
         </div>
-        <div className="hidden md:flex gap-8 text-sm font-medium text-gray-600">
-          <button onClick={() => setCurrentView('home')} className={`transition-colors ${currentView === 'home' ? 'text-black font-bold' : 'hover:text-black'}`}>Beranda</button>
-          <button onClick={() => setCurrentView('stats')} className={`transition-colors ${currentView === 'stats' ? 'text-black font-bold' : 'hover:text-black'}`}>Statistik</button>
-          <button onClick={() => setShowAbout(true)} className="hover:text-black transition-colors">Tentang</button>
+        <div className={`hidden md:flex gap-8 text-sm font-medium ${isNight ? 'text-gray-400' : 'text-gray-600'}`}>
+          <button onClick={() => setCurrentView('home')} className={`transition-colors ${currentView === 'home' ? (isNight ? 'text-white font-bold' : 'text-black font-bold') : (isNight ? 'hover:text-white' : 'hover:text-black')}`}>Beranda</button>
+          <button onClick={() => setCurrentView('stats')} className={`transition-colors ${currentView === 'stats' ? (isNight ? 'text-white font-bold' : 'text-black font-bold') : (isNight ? 'hover:text-white' : 'hover:text-black')}`}>Statistik</button>
+          <button onClick={() => setShowAbout(true)} className={isNight ? 'hover:text-white transition-colors' : 'hover:text-black transition-colors'}>Tentang</button>
         </div>
       </nav>
 
@@ -539,8 +545,8 @@ export default function App() {
 
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="mt-24 mb-12">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6">
-                <h2 className="text-3xl md:text-4xl font-bold max-w-xl leading-tight text-gray-900">
-                  Membangun Kebiasaan dengan <span className="text-gray-400">Bhakti</span>
+                <h2 className={`text-3xl md:text-4xl font-bold max-w-xl leading-tight ${isNight ? 'text-white' : 'text-gray-900'}`}>
+                  Membangun Kebiasaan dengan <span className={isNight ? 'text-gray-400' : 'text-gray-400'}>Bhakti</span>
                 </h2>
                 <motion.button 
                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
