@@ -36,16 +36,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   
   const { data: historyData, error: historyError } = await supabase
     .from('prayer_history')
-    .select('date')
+    .select('*')
     .eq('date', todayStr);
 
   if (historyError) {
     return res.status(500).json({ error: 'Failed to query history' });
   }
 
-  // If already prayed today, do not send notification
-  if (historyData && historyData.length > 0) {
-    return res.status(200).json({ message: 'Already prayed today. No notification sent.' });
+  // If already prayed night today, do not send notification
+  if (historyData && historyData.length > 0 && historyData[0].night === true) {
+    return res.status(200).json({ message: 'Already prayed tonight. No notification sent.' });
   }
 
   // If not prayed, get subscriptions

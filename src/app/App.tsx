@@ -1,11 +1,17 @@
-import { useState, useEffect } from 'react';
-import { Moon, ArrowUpRight, CheckCircle2, Star, Activity, User, Sun, Calendar, BellRing, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Moon, ArrowUpRight, CheckCircle2, Star, Activity, User, Sun, Calendar, BellRing, X, ArrowRight, Cloud, CloudRain } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import confetti from 'canvas-confetti';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls } from 'framer-motion';
+
+interface PrayerRecord {
+  date: string;
+  morning: boolean;
+  night: boolean;
+}
 
 interface PrayerData {
-  history: string[]; 
+  history: PrayerRecord[];
 }
 
 const slokas = [
@@ -18,16 +24,96 @@ const slokas = [
 
 const urlBase64ToUint8Array = (base64String: string) => {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding)
-    .replace(/\-/g, '+')
-    .replace(/_/g, '/');
+  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
+  for (let i = 0; i < rawData.length; ++i) { outputArray[i] = rawData.charCodeAt(i); }
   return outputArray;
-}
+};
+
+// --- Interactive Features ---
+const playBell = () => {
+  const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(880, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 2.5);
+  gain.gain.setValueAtTime(0.3, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 2.5);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 2.5);
+};
+
+const Typewriter = ({ text }: { text: string }) => {
+  const [displayed, setDisplayed] = useState('');
+  useEffect(() => {
+    setDisplayed('');
+    let i = 0;
+    const interval = setInterval(() => {
+      setDisplayed(text.slice(0, i));
+      i++;
+      if (i > text.length) clearInterval(interval);
+    }, 40);
+    return () => clearInterval(interval);
+  }, [text]);
+  return <span>{displayed}</span>;
+};
+
+const Particles = () => {
+  const [windowSize, setWindowSize] = useState({ w: 1000, h: 800 });
+  useEffect(() => {
+    setWindowSize({ w: window.innerWidth, h: window.innerHeight });
+  }, []);
+  
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none z-0 opacity-40">
+      {[...Array(15)].map((_, i) => (
+        <motion.div
+          key={i}
+          className="absolute w-1.5 h-1.5 bg-gray-400 rounded-full blur-[1px]"
+          initial={{ x: Math.random() * windowSize.w, y: Math.random() * windowSize.h }}
+          animate={{ x: Math.random() * windowSize.w, y: Math.random() * windowSize.h }}
+          transition={{ duration: Math.random() * 30 + 30, repeat: Infinity, repeatType: "reverse", ease: "linear" }}
+        />
+      ))}
+    </div>
+  );
+};
+
+const SwipeToPray = ({ type, completed, onComplete }: { type: 'morning' | 'night', completed: boolean, onComplete: () => void }) => {
+  const Icon = type === 'morning' ? Sun : Moon;
+  const label = type === 'morning' ? 'Sembahyang Pagi' : 'Sembahyang Malam';
+  
+  if (completed) {
+    return (
+      <div className="relative w-64 h-16 bg-black rounded-full flex items-center justify-center text-white shadow-md border border-gray-800">
+         <CheckCircle2 className="w-5 h-5 mr-2 text-green-400" /> <span className="font-semibold">{label} Selesai</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-64 h-16 bg-white/50 backdrop-blur-md rounded-full overflow-hidden flex items-center border border-gray-200 shadow-inner group">
+      <span className="absolute w-full text-center text-gray-500 font-semibold text-sm pointer-events-none pr-4">Geser {label}</span>
+      <motion.div
+        drag="x"
+        dragConstraints={{ left: 0, right: 256 - 60 - 8 }} // 64 = 256px. 256 - 60(btn) - 8(pad)
+        dragElastic={0.1}
+        onDragEnd={(e, info) => {
+          if (info.offset.x > 120) onComplete();
+        }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        className="absolute left-1 top-1 w-14 h-14 bg-black rounded-full z-10 flex items-center justify-center text-white shadow-xl cursor-grab active:cursor-grabbing"
+      >
+        <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+      </motion.div>
+    </div>
+  );
+};
 
 export default function App() {
   const [prayerData, setPrayerData] = useState<PrayerData>({ history: [] });
@@ -36,35 +122,46 @@ export default function App() {
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [activeQuote, setActiveQuote] = useState<string | null>(null);
+  
+  // Logical Time: 6 AM Reset
+  const getLogicalDateStr = () => {
+    const d = new Date();
+    if (d.getHours() < 6) d.setDate(d.getDate() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const todayStr = getLogicalDateStr();
+  const currentHour = new Date().getHours();
+  
+  // Live Theme calculation
+  const isMorning = currentHour >= 6 && currentHour < 15;
+  const isAfternoon = currentHour >= 15 && currentHour < 18;
+  const isNight = currentHour >= 18 || currentHour < 6;
+
+  const heroTheme = isNight 
+    ? "from-gray-900 via-indigo-950 to-slate-900 text-white" 
+    : isMorning
+      ? "from-sky-100 via-blue-50 to-amber-50 text-gray-900"
+      : "from-orange-100 via-amber-50 to-red-50 text-gray-900";
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const { data, error } = await supabase
-          .from('prayer_history')
-          .select('date')
-          .order('date', { ascending: false });
+        const { data, error } = await supabase.from('prayer_history').select('*').order('date', { ascending: false });
 
         if (error) {
           console.error('Error fetching from Supabase:', error);
-          const stored = localStorage.getItem('sembahyangData');
-          if (stored) setPrayerData(JSON.parse(stored));
+          setIsLoading(false);
           return;
         }
 
-        const history = data.map(row => row.date);
-        const stored = localStorage.getItem('sembahyangData');
-        if (history.length === 0 && stored) {
-            const localData = JSON.parse(stored);
-            if (localData.history && localData.history.length > 0) {
-               const inserts = localData.history.map((d: string) => ({ date: d }));
-               const { error: insertError } = await supabase.from('prayer_history').insert(inserts);
-               if (!insertError) history.push(...localData.history);
-            }
-        }
+        const history: PrayerRecord[] = data.map((row: any) => ({
+           date: row.date, 
+           morning: row.morning || false, 
+           night: row.night || false // if older row had no morning/night, it defaults to false (but SQL update made night true)
+        }));
         
         setPrayerData({ history });
-        localStorage.setItem('sembahyangData', JSON.stringify({ history }));
       } catch (err) {
          console.error('Unexpected error:', err);
       } finally {
@@ -74,20 +171,20 @@ export default function App() {
     fetchData();
   }, []);
 
-  const getTodayStr = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
-
-  const todayStr = getTodayStr();
-  const hasPrayedToday = prayerData.history.includes(todayStr);
+  const todayRecord = prayerData.history.find(r => r.date === todayStr) || { date: todayStr, morning: false, night: false };
 
   const calculateStreak = () => {
     if (prayerData.history.length === 0) return 0;
     let streak = 0;
-    const historySet = new Set(prayerData.history);
+    const historySet = new Set(prayerData.history.filter(r => r.morning || r.night).map(r => r.date));
     let checkDate = new Date();
-    if (!hasPrayedToday) checkDate.setDate(checkDate.getDate() - 1);
+    if (checkDate.getHours() < 6) checkDate.setDate(checkDate.getDate() - 1);
+    
+    // Check if hasn't prayed today at all
+    if (!todayRecord.morning && !todayRecord.night) {
+      checkDate.setDate(checkDate.getDate() - 1);
+    }
+    
     while (true) {
       const dateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
       if (historySet.has(dateStr)) {
@@ -100,8 +197,10 @@ export default function App() {
 
   const calculateConsistency = () => {
     let prayedDays = 0;
-    const historySet = new Set(prayerData.history);
+    const historySet = new Set(prayerData.history.filter(r => r.morning || r.night).map(r => r.date));
     const checkDate = new Date();
+    if (checkDate.getHours() < 6) checkDate.setDate(checkDate.getDate() - 1);
+
     for (let i = 0; i < 30; i++) {
       const dateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
       if (historySet.has(dateStr)) prayedDays++;
@@ -110,27 +209,26 @@ export default function App() {
     return Math.round((prayedDays / 30) * 100);
   };
 
-  const handlePrayed = async () => {
-    if (!hasPrayedToday) {
-      // Fire Confetti!
-      confetti({
-        particleCount: 150,
-        spread: 80,
-        origin: { y: 0.6 },
-        colors: ['#000000', '#ffffff', '#888888', '#aaaaaa'] 
-      });
+  const handlePrayed = async (type: 'morning' | 'night') => {
+    playBell();
+    confetti({
+      particleCount: 150,
+      spread: 80,
+      origin: { y: 0.6 },
+      colors: type === 'morning' ? ['#FDE68A', '#FCD34D', '#ffffff'] : ['#000000', '#ffffff', '#888888'] 
+    });
 
-      const newHistory = [...prayerData.history, todayStr];
-      const newData = { history: newHistory };
-      setPrayerData(newData);
-      localStorage.setItem('sembahyangData', JSON.stringify(newData));
+    const updatedRecord = { ...todayRecord, [type]: true };
+    const newHistory = [...prayerData.history.filter(r => r.date !== todayStr), updatedRecord];
+    setPrayerData({ history: newHistory });
+    
+    const { error } = await supabase.from('prayer_history').upsert({ 
+       date: todayStr, 
+       morning: updatedRecord.morning, 
+       night: updatedRecord.night 
+    });
       
-      const { error } = await supabase
-        .from('prayer_history')
-        .insert([{ date: todayStr }]);
-        
-      if (error) console.error('Error saving to Supabase:', error);
-    }
+    if (error) console.error('Error saving to Supabase:', error);
   };
   
   const subscribeToPush = async () => {
@@ -149,7 +247,7 @@ export default function App() {
       
       const publicVapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
       if (!publicVapidKey) {
-        alert('Kunci VAPID belum dikonfigurasi di server. (Tolong tambahkan di Vercel Dashboard dan Re-deploy!).');
+        alert('Kunci VAPID belum dikonfigurasi di server.');
         return;
       }
 
@@ -169,7 +267,6 @@ export default function App() {
       if (error && error.code === '23505') {
           alert('Perangkat ini sudah terdaftar untuk menerima notifikasi pengingat.');
       } else if (error) {
-          console.error('Error saving subscription', error);
           alert('Gagal mengaktifkan notifikasi di database.');
       } else {
         alert('Notifikasi Pengingat berhasil diaktifkan! Anda akan diingatkan setiap jam 8 malam.');
@@ -194,13 +291,16 @@ export default function App() {
   const generateLast30Days = () => {
     const days = [];
     const checkDate = new Date();
+    if (checkDate.getHours() < 6) checkDate.setDate(checkDate.getDate() - 1);
     checkDate.setDate(checkDate.getDate() - 29);
     for (let i = 0; i < 30; i++) {
       const dateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+      const record = prayerData.history.find(r => r.date === dateStr);
       days.push({
         date: new Date(checkDate),
         dateStr,
-        prayed: prayerData.history.includes(dateStr)
+        prayedMorning: record?.morning || false,
+        prayedNight: record?.night || false,
       });
       checkDate.setDate(checkDate.getDate() + 1);
     }
@@ -212,7 +312,7 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="animate-pulse flex flex-col items-center">
           <Moon className="w-10 h-10 text-gray-400 mb-4 animate-spin-slow" />
-          <p className="text-gray-500 font-medium">Memuat data...</p>
+          <p className="text-gray-500 font-medium">Memuat energi prana...</p>
         </div>
       </div>
     );
@@ -220,32 +320,21 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-white via-gray-50 to-gray-200 text-black font-sans selection:bg-black selection:text-white relative overflow-hidden">
-      
+      <Particles />
+
       {/* About Modal */}
       <AnimatePresence>
         {showAbout && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl relative"
-            >
-              <button onClick={() => setShowAbout(false)} className="absolute top-6 right-6 text-gray-400 hover:text-black transition-colors">
-                <X className="w-6 h-6" />
-              </button>
-              <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-6">
-                <Moon className="w-6 h-6 text-black" />
-              </div>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl relative">
+              <button onClick={() => setShowAbout(false)} className="absolute top-6 right-6 text-gray-400 hover:text-black transition-colors"><X className="w-6 h-6" /></button>
+              <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-6"><Moon className="w-6 h-6 text-black" /></div>
               <h2 className="text-2xl font-bold mb-4">Filosofi Bhakti</h2>
               <p className="text-gray-600 mb-6 leading-relaxed">
-                Aplikasi ini dibangun eksklusif untuk Anda sebagai pengingat personal dalam memelihara konsistensi spiritual (Sradha & Bhakti). 
-                Waktu terbaik untuk merenung adalah saat malam tiba, ketika dunia terlelap dan batin siap untuk hening.
+                Hari spiritual baru dimulai saat fajar menyingsing (06:00 WITA). 
+                Aplikasi ini merekam jejak bhakti Anda di pagi hari sebagai bekal karma baik, dan malam hari sebagai bentuk rasa syukur.
               </p>
-              <button onClick={() => setShowAbout(false)} className="w-full py-3 bg-black text-white rounded-xl font-semibold hover:bg-gray-800 transition-colors">
-                Tutup
-              </button>
+              <button onClick={() => setShowAbout(false)} className="w-full py-3 bg-black text-white rounded-xl font-semibold hover:bg-gray-800 transition-colors">Tutup</button>
             </motion.div>
           </motion.div>
         )}
@@ -254,23 +343,13 @@ export default function App() {
       {/* Quote Modal */}
       <AnimatePresence>
         {activeQuote && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-            onClick={() => setActiveQuote(null)}
-          >
-            <motion.div 
-              initial={{ scale: 0.9, rotateX: 20 }} animate={{ scale: 1, rotateX: 0 }} exit={{ scale: 0.9, rotateX: 20 }}
-              className="bg-gray-900 text-white rounded-3xl p-8 md:p-10 max-w-lg w-full shadow-2xl relative text-center cursor-pointer"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Star className="w-8 h-8 text-gray-400 mx-auto mb-6" />
-              <p className="text-xl md:text-2xl font-medium leading-relaxed italic">
-                {activeQuote}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4" onClick={() => setActiveQuote(null)}>
+            <motion.div initial={{ scale: 0.8, rotateX: 20 }} animate={{ scale: 1, rotateX: 0 }} exit={{ scale: 0.8, rotateX: 20 }} className="bg-gradient-to-b from-gray-800 to-black border border-gray-700 text-white rounded-[2rem] p-8 md:p-12 max-w-lg w-full shadow-2xl relative text-center cursor-pointer" onClick={(e) => e.stopPropagation()}>
+              <Star className="w-8 h-8 text-yellow-500 mx-auto mb-8 animate-pulse" />
+              <p className="text-xl md:text-2xl font-medium leading-relaxed italic text-gray-200">
+                <Typewriter text={activeQuote} />
               </p>
-              <button onClick={() => setActiveQuote(null)} className="mt-8 px-6 py-2 border border-gray-700 rounded-full text-sm text-gray-400 hover:text-white hover:border-gray-400 transition-colors">
-                Selesai
-              </button>
+              <button onClick={() => setActiveQuote(null)} className="mt-12 px-8 py-3 bg-white/10 rounded-full text-sm font-semibold hover:bg-white/20 transition-colors">Tutup</button>
             </motion.div>
           </motion.div>
         )}
@@ -288,21 +367,6 @@ export default function App() {
           <button onClick={() => setCurrentView('stats')} className={`transition-colors ${currentView === 'stats' ? 'text-black font-bold' : 'hover:text-black'}`}>Statistik</button>
           <button onClick={() => setShowAbout(true)} className="hover:text-black transition-colors">Tentang</button>
         </div>
-        <div className="flex gap-4">
-          <motion.button 
-            whileHover={!hasPrayedToday ? { scale: 1.05 } : {}}
-            whileTap={!hasPrayedToday ? { scale: 0.95 } : {}}
-            onClick={handlePrayed}
-            disabled={hasPrayedToday}
-            className={`px-5 py-2 text-sm font-semibold rounded-full transition-colors ${
-              hasPrayedToday 
-                ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed' 
-                : 'bg-black text-white hover:bg-gray-800'
-            }`}
-          >
-            {hasPrayedToday ? 'Selesai Hari Ini' : 'Sembahyang'}
-          </motion.button>
-        </div>
       </nav>
 
       <main className="max-w-7xl mx-auto px-8 pt-4 md:pt-12 pb-24 relative z-10">
@@ -315,26 +379,28 @@ export default function App() {
                   </div>
                   <div>
                     <h2 className="text-3xl font-bold">Riwayat 30 Hari</h2>
-                    <p className="text-gray-500">Jejak konsistensi sembahyang Anda</p>
+                    <p className="text-gray-500">Titik kuning: Pagi, Titik hitam: Malam</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-5 sm:grid-cols-7 md:grid-cols-10 gap-3">
                   {generateLast30Days().map((day, i) => (
                     <motion.div 
-                      key={i} 
-                      whileHover={{ scale: 1.15, y: -5 }}
-                      className={`aspect-square rounded-xl flex flex-col items-center justify-center text-xs font-semibold cursor-default ${
-                        day.prayed 
-                          ? 'bg-black text-white shadow-lg' 
-                          : 'bg-gray-100 text-gray-400 border border-gray-200'
-                      }`}
-                      title={`${day.dateStr} - ${day.prayed ? 'Selesai' : 'Kosong'}`}
+                      key={i} whileHover={{ scale: 1.15, y: -5 }}
+                      className="aspect-square rounded-xl flex flex-col items-center justify-center text-xs font-semibold cursor-default bg-gray-50 border border-gray-200 relative overflow-hidden"
+                      title={`${day.dateStr}`}
                     >
-                      <span>{day.date.getDate()}</span>
-                      <span className="text-[10px] opacity-60">
-                        {day.date.toLocaleDateString('id-ID', { weekday: 'short' })}
-                      </span>
+                      <span className="z-10">{day.date.getDate()}</span>
+                      <span className="text-[10px] opacity-60 z-10">{day.date.toLocaleDateString('id-ID', { weekday: 'short' })}</span>
+                      
+                      {/* Indicators */}
+                      <div className="absolute bottom-1.5 flex gap-1 z-10">
+                         {day.prayedMorning && <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 shadow-sm"></div>}
+                         {day.prayedNight && <div className="w-1.5 h-1.5 rounded-full bg-black shadow-sm"></div>}
+                      </div>
+                      
+                      {/* Full fill if both completed */}
+                      {(day.prayedMorning && day.prayedNight) && <div className="absolute inset-0 bg-green-100 opacity-50 z-0"></div>}
                     </motion.div>
                   ))}
                 </div>
@@ -354,92 +420,59 @@ export default function App() {
         ) : (
           <>
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-16">
-              <div className="lg:col-span-7 bg-gradient-to-br from-gray-100 to-gray-50 rounded-[2rem] p-8 md:p-12 flex flex-col justify-between border border-gray-200/50 shadow-sm relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-gray-200 rounded-full blur-3xl opacity-50 -mr-20 -mt-20 pointer-events-none"></div>
+              {/* LIVE THEME HERO CARD */}
+              <div className={`lg:col-span-7 bg-gradient-to-br rounded-[2rem] p-8 md:p-12 flex flex-col justify-between border border-gray-200/20 shadow-sm relative overflow-hidden transition-colors duration-1000 ${heroTheme}`}>
+                <div className="absolute top-0 right-0 w-64 h-64 bg-white/20 rounded-full blur-3xl opacity-50 -mr-20 -mt-20 pointer-events-none"></div>
                 
                 <div className="relative z-10">
                   <div className="flex items-center gap-3 mb-6">
-                    <span className="px-3 py-1 bg-white border border-gray-200 rounded-full text-xs font-semibold tracking-wide flex items-center gap-2 shadow-sm">
-                      <Star className="w-3 h-3" /> PENGINGAT HARIAN
+                    <span className="px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-semibold tracking-wide flex items-center gap-2 border border-white/20">
+                      {isMorning ? <Sun className="w-3 h-3"/> : isAfternoon ? <Cloud className="w-3 h-3"/> : <Star className="w-3 h-3" />} 
+                      {isMorning ? "SELAMAT PAGI" : isAfternoon ? "SELAMAT SORE" : "SELAMAT MALAM"}
                     </span>
                   </div>
                   
-                  <h1 className="text-5xl md:text-7xl font-bold tracking-tight leading-[1.1] mb-6">
+                  <h1 className="text-5xl md:text-7xl font-bold tracking-tight leading-[1.1] mb-6 drop-shadow-sm">
                     Sembahyang <br />
-                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-gray-900 to-gray-500">
-                      Malam
+                    <span className="opacity-80">
+                       Harian
                     </span>
                   </h1>
                   
-                  <p className="text-gray-600 max-w-md text-lg mb-12">
-                    Kami hadir untuk membantu Anda membangun kebiasaan baik yang konsisten. Terus jaga sradha dan bhakti setiap malam.
+                  <p className="opacity-90 max-w-md text-lg mb-12">
+                    Hari baru dihitung mulai fajar menyingsing. Kumpulkan kedamaian batin dari pagi hingga malam.
                   </p>
                 </div>
 
-                <div className="relative z-10 flex flex-wrap items-center gap-4 mt-auto">
-                  <motion.button
-                    whileHover={!hasPrayedToday ? { scale: 1.05 } : {}}
-                    whileTap={!hasPrayedToday ? { scale: 0.95 } : {}}
-                    onClick={handlePrayed}
-                    disabled={hasPrayedToday}
-                    className={`px-8 py-4 rounded-full text-lg font-semibold transition-colors flex items-center gap-3 ${
-                      hasPrayedToday 
-                        ? 'bg-white text-gray-400 cursor-not-allowed border border-gray-200 shadow-sm' 
-                        : 'bg-black text-white hover:bg-gray-800 shadow-xl shadow-black/10'
-                    }`}
-                  >
-                    {hasPrayedToday ? 'Selesai ✅' : 'Sudah Sembahyang'} 
-                    {!hasPrayedToday && <ArrowUpRight className="w-5 h-5" />}
-                  </motion.button>
-                  
-                  {hasPrayedToday && (
-                     <motion.span initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="text-sm font-medium text-gray-500 bg-gray-100 px-4 py-2 rounded-full">
-                        Astungkara, sampai jumpa besok!
-                     </motion.span>
-                  )}
+                <div className="relative z-10 flex flex-col sm:flex-row gap-4 mt-auto">
+                   <SwipeToPray type="morning" completed={todayRecord.morning} onComplete={() => handlePrayed('morning')} />
+                   <SwipeToPray type="night" completed={todayRecord.night} onComplete={() => handlePrayed('night')} />
                 </div>
               </div>
 
               <div className="lg:col-span-5 grid grid-cols-2 gap-6">
-                <motion.div 
-                  drag dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }} dragElastic={0.2}
-                  className="col-span-2 sm:col-span-1 bg-white rounded-[2rem] p-6 border border-gray-100 shadow-sm flex flex-col justify-center items-center text-center cursor-grab active:cursor-grabbing hover:border-gray-300 transition-colors"
-                >
+                <motion.div drag dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }} dragElastic={0.2} className="col-span-2 sm:col-span-1 bg-white rounded-[2rem] p-6 border border-gray-100 shadow-sm flex flex-col justify-center items-center text-center cursor-grab active:cursor-grabbing hover:border-gray-300 transition-colors z-20 bg-opacity-90 backdrop-blur-sm">
                   <h3 className="text-6xl font-bold tracking-tighter mb-2 text-gray-900">{streak}<span className="text-3xl text-gray-400">+</span></h3>
                   <p className="text-sm text-gray-500 font-medium leading-relaxed">Hari berturut-turut<br/>menjaga konsistensi</p>
                   <div className="mt-6 flex -space-x-2">
-                    <div className="w-8 h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center shadow-sm"><User className="w-4 h-4 text-gray-500"/></div>
-                    <div className="w-8 h-8 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center shadow-sm"><Activity className="w-4 h-4 text-gray-600"/></div>
-                    <div className="w-8 h-8 rounded-full bg-gray-900 border-2 border-white flex items-center justify-center shadow-sm"><Star className="w-4 h-4 text-white"/></div>
+                    <div className="w-8 h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center"><User className="w-4 h-4 text-gray-500"/></div>
+                    <div className="w-8 h-8 rounded-full bg-yellow-100 border-2 border-white flex items-center justify-center"><Sun className="w-4 h-4 text-yellow-600"/></div>
+                    <div className="w-8 h-8 rounded-full bg-gray-900 border-2 border-white flex items-center justify-center"><Moon className="w-4 h-4 text-white"/></div>
                   </div>
                 </motion.div>
 
-                <motion.div 
-                  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                  onClick={showRandomSloka}
-                  className="col-span-2 sm:col-span-1 bg-gradient-to-tr from-gray-900 to-gray-700 rounded-[2rem] p-6 shadow-sm relative overflow-hidden group cursor-pointer"
-                >
-                   <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIi8+PC9zdmc+')] opacity-20 group-hover:scale-110 transition-transform duration-700"></div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={showRandomSloka} className="col-span-2 sm:col-span-1 bg-gradient-to-tr from-gray-900 to-gray-700 rounded-[2rem] p-6 shadow-sm relative overflow-hidden group cursor-pointer">
                    <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-2xl pointer-events-none"></div>
                    <Moon className="w-12 h-12 text-white/80 absolute bottom-6 right-6 drop-shadow-lg" />
-                   <p className="text-white/40 text-xs font-bold uppercase tracking-widest absolute top-6 left-6">Klik Saya</p>
+                   <p className="text-white/40 text-xs font-bold uppercase tracking-widest absolute top-6 left-6">Pesan Alam</p>
                 </motion.div>
 
-                <motion.div 
-                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                  onClick={showRandomSloka}
-                  className="col-span-2 bg-gradient-to-br from-gray-100 to-gray-200 rounded-[2rem] p-8 border border-white flex items-center justify-between relative overflow-hidden shadow-sm group cursor-pointer"
-                >
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={showRandomSloka} className="col-span-2 bg-gradient-to-br from-white to-gray-100 rounded-[2rem] p-8 border border-gray-200 flex items-center justify-between relative overflow-hidden shadow-sm group cursor-pointer">
                    <div className="z-10">
                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 group-hover:text-black transition-colors">Lihat Sloka</p>
                      <h4 className="text-2xl font-bold text-gray-900 leading-tight">Ketenangan Hati &<br/>Pikiran Positif</h4>
                    </div>
-                   <motion.div 
-                     initial={{ rotate: 0 }}
-                     whileHover={{ rotate: 180 }}
-                     transition={{ duration: 0.4 }}
-                     className="w-24 h-24 bg-white/80 backdrop-blur-md rounded-2xl shadow-sm flex items-center justify-center z-10"
-                   >
+                   <motion.div initial={{ rotate: 0 }} whileHover={{ rotate: 180 }} transition={{ duration: 0.4 }} className="w-24 h-24 bg-white rounded-2xl shadow-sm flex items-center justify-center z-10 border border-gray-100">
                      <CheckCircle2 className="w-10 h-10 text-gray-800" />
                    </motion.div>
                 </motion.div>
@@ -455,18 +488,15 @@ export default function App() {
                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
                    onClick={subscribeToPush}
                    disabled={isSubscribing}
-                   className="flex items-center gap-2 text-sm font-semibold bg-white px-5 py-2.5 rounded-full shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors"
+                   className="flex items-center gap-2 text-sm font-semibold bg-white px-5 py-2.5 rounded-full shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors z-20"
                 >
                    <BellRing className={`w-4 h-4 ${isSubscribing ? 'animate-bounce' : 'text-gray-600'}`} /> 
                    {isSubscribing ? 'Mengaktifkan...' : 'Aktifkan Pengingat HP'}
                 </motion.button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
-                <motion.div 
-                  whileHover={{ y: -10 }} onClick={showRandomSloka}
-                  className="bg-gray-900 text-white rounded-[2rem] p-8 relative overflow-hidden group shadow-xl shadow-gray-900/10 cursor-pointer"
-                >
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 relative z-20">
+                <motion.div whileHover={{ y: -10 }} onClick={showRandomSloka} className="bg-gray-900 text-white rounded-[2rem] p-8 relative overflow-hidden group shadow-xl shadow-gray-900/10 cursor-pointer">
                    <div className="absolute top-6 right-6 w-12 h-12 bg-white/10 rounded-full flex items-center justify-center group-hover:bg-white/20 group-hover:rotate-45 transition-all">
                      <ArrowUpRight className="w-5 h-5 text-white" />
                    </div>
@@ -476,40 +506,27 @@ export default function App() {
                    </div>
                 </motion.div>
 
-                <motion.div 
-                  whileHover={{ y: -10 }} onClick={showRandomSloka}
-                  className="bg-gradient-to-b from-white to-gray-100 rounded-[2rem] p-8 relative overflow-hidden border border-gray-200 shadow-sm cursor-pointer group"
-                >
+                <motion.div whileHover={{ y: -10 }} onClick={showRandomSloka} className="bg-gradient-to-b from-white to-orange-50 rounded-[2rem] p-8 relative overflow-hidden border border-gray-200 shadow-sm cursor-pointer group">
                    <div className="flex items-center gap-2 mb-20 group-hover:scale-110 origin-left transition-transform">
-                     <Sun className="w-5 h-5 text-gray-500 group-hover:text-yellow-500 transition-colors" />
+                     <Sun className="w-5 h-5 text-orange-500" />
                      <span className="font-bold text-gray-600 tracking-wide">Fajar</span>
                    </div>
                    <h4 className="text-2xl font-bold text-gray-900 leading-snug">Sambut pagi<br/>dengan kedamaian</h4>
-                   <div className="absolute -bottom-16 -right-16 w-48 h-48 bg-gray-200/50 rounded-full blur-3xl pointer-events-none group-hover:bg-yellow-100/50 transition-colors duration-700"></div>
+                   <div className="absolute -bottom-16 -right-16 w-48 h-48 bg-orange-200/40 rounded-full blur-3xl pointer-events-none group-hover:bg-orange-300/50 transition-colors duration-700"></div>
                 </motion.div>
 
-                <motion.div 
-                  whileHover={{ y: -10 }}
-                  className="bg-white rounded-[2rem] p-8 border border-gray-200 shadow-sm flex flex-col justify-center relative group"
-                >
+                <motion.div whileHover={{ y: -10 }} className="bg-white rounded-[2rem] p-8 border border-gray-200 shadow-sm flex flex-col justify-center relative group">
                    <div className="flex justify-between items-start mb-8">
                      <div>
                        <h3 className="text-6xl font-bold tracking-tighter mb-1 text-gray-900">{consistency}<span className="text-3xl text-gray-300">%</span></h3>
                        <p className="text-gray-500 font-medium">Konsistensi 30 Hari</p>
                      </div>
-                     <motion.div 
-                       whileHover={{ scale: 1.1, rotate: 10 }} whileTap={{ scale: 0.9 }}
-                       className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center shadow-md cursor-pointer" 
-                       onClick={() => setCurrentView('stats')}
-                     >
+                     <motion.div whileHover={{ scale: 1.1, rotate: 10 }} whileTap={{ scale: 0.9 }} className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center shadow-md cursor-pointer" onClick={() => setCurrentView('stats')}>
                        <Calendar className="w-5 h-5" />
                      </motion.div>
                    </div>
                    <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden mt-auto">
-                     <motion.div 
-                        initial={{ width: 0 }} animate={{ width: `${consistency}%` }} transition={{ duration: 1.5, delay: 0.5, ease: 'easeOut' }}
-                        className="h-full bg-black rounded-full"
-                     ></motion.div>
+                     <motion.div initial={{ width: 0 }} animate={{ width: `${consistency}%` }} transition={{ duration: 1.5, delay: 0.5, ease: 'easeOut' }} className="h-full bg-black rounded-full"></motion.div>
                    </div>
                    <p className="text-xs text-gray-500 mt-5 font-medium flex items-center gap-2 group-hover:text-black transition-colors">
                      <CheckCircle2 className="w-3.5 h-3.5" /> Ketenangan Jiwa terukur
